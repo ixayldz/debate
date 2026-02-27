@@ -1,0 +1,1687 @@
+tags:
+  - name: System
+  - name: Auth
+  - name: Users
+  - name: Rooms
+  - name: Moderation
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        requestId: { type: string }
+        code: { type: string }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+    MessageResponse:
+      type: object
+      properties:
+        message: { type: string }
+    SuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+    AuthTokens:
+      type: object
+      properties:
+        accessToken: { type: string }
+    AuthUser:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        displayName: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+        language: { type: string, enum: [tr, en] }
+    RegisterRequest:
+      type: object
+      required: [username, displayName, email, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 30 }
+        displayName: { type: string, minLength: 1, maxLength: 50 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        language: { type: string, enum: [tr, en] }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    PhoneOtpRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone: { type: string }
+    PhoneOtpVerifyRequest:
+      type: object
+      required: [phone, code]
+      properties:
+        phone: { type: string }
+        code: { type: string, minLength: 6, maxLength: 6 }
+        username: { type: string }
+        displayName: { type: string }
+        language: { type: string, enum: [tr, en] }
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    PasswordResetConfirmRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: { type: string }
+        password: { type: string, minLength: 8 }
+    VerifyEmailRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    OAuthUrlResponse:
+      type: object
+      properties:
+        url: { type: string }
+        state: { type: string }
+    ExchangeCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    ExchangeCodeResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        userId: { type: integer }
+    RoomCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        category: { type: string }
+        language: { type: string, enum: [tr, en] }
+        visibility: { type: string, enum: [public, private] }
+        maxSpeakers: { type: integer, minimum: 2, maximum: 10 }
+        micRequestsEnabled: { type: boolean }
+        tags:
+          type: array
+          items: { type: string }
+    RoomUpdateRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        category: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        maxSpeakers: { type: integer, minimum: 2, maximum: 10 }
+        micRequestsEnabled: { type: boolean }
+    RoomSummary:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        language: { type: string, enum: [tr, en] }
+        visibility: { type: string, enum: [public, private] }
+        maxSpeakers: { type: integer }
+        micRequestsEnabled: { type: boolean }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    RoomJoinResponse:
+      type: object
+      properties:
+        roomId: { type: string }
+        role: { type: string }
+        token: { type: string }
+        micRequestsEnabled: { type: boolean }
+    UserMe:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        displayName: { type: string }
+        email: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+        bio: { type: string, nullable: true }
+        interests:
+          type: array
+          items: { type: string }
+        language: { type: string, enum: [tr, en] }
+        createdAt: { type: string, format: date-time }
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        username: { type: string }
+        displayName: { type: string }
+        bio: { type: string }
+        avatarUrl: { type: string }
+        interests:
+          type: array
+          items: { type: string }
+        language: { type: string, enum: [tr, en] }
+    ReportUserRequest:
+      type: object
+      required: [targetType, targetId, category]
+      properties:
+        targetType: { type: string, enum: [user] }
+        targetId: { type: string }
+        category: { type: string, enum: [harassment, hate_speech, spam, other] }
+        description: { type: string }
+    ReportRoomRequest:
+      type: object
+      required: [targetType, roomId, category]
+      properties:
+        targetType: { type: string, enum: [room] }
+        roomId: { type: string }
+        category: { type: string, enum: [harassment, hate_speech, spam, other] }
+        description: { type: string }
+    Report:
+      type: object
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        reason: { type: string }
+        reporterId: { type: integer }
+        reportedUserId: { type: integer, nullable: true }
+        roomId: { type: integer, nullable: true }
+        description: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    ReportListResponse:
+      type: object
+      properties:
+        reports:
+          type: array
+          items: { $ref: '#/components/schemas/Report' }
+        total: { type: integer }
+        page: { type: integer }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer }
+        roomId: { type: integer, nullable: true }
+        action: { type: string }
+        actorId: { type: integer, nullable: true }
+        targetId: { type: integer, nullable: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt: { type: string, format: date-time }
+
+paths:
+  /:
+    get:
+      tags: [System]
+      summary: Service metadata
+      responses:
+        '200':
+          description: Service info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  version: { type: string }
+                  status: { type: string }
+                  docs: { type: string }
+                  health: { type: string }
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '503':
+          description: Degraded
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /live:
+    get:
+      tags: [System]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Process alive
+
+  /ready:
+    get:
+      tags: [System]
+      summary: Readiness probe
+      responses:
+        '200':
+          description: Ready
+        '503':
+          description: Not ready
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Text metrics payload
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/AuthUser' }
+                  accessToken: { type: string }
+        '400':
+          description: Validation/business error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email/password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/AuthUser' }
+                  accessToken: { type: string }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429':
+          description: Too many attempts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token (uses HttpOnly refresh cookie)
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+        '401':
+          description: Invalid refresh token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/phone/request-otp:
+    post:
+      tags: [Auth]
+      summary: Send OTP SMS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneOtpRequest'
+      responses:
+        '200':
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  expiresIn: { type: integer }
+                  deliveryId: { type: string, nullable: true }
+        '409':
+          description: OTP cooldown active
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: SMS provider unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/phone/verify-otp:
+    post:
+      tags: [Auth]
+      summary: Verify OTP and login/register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneOtpVerifyRequest'
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/AuthUser' }
+                  isNewUser: { type: boolean }
+                  accessToken: { type: string }
+        '401':
+          description: Invalid OTP
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout user and clear refresh cookie
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/password-reset:
+    post:
+      tags: [Auth]
+      summary: Request password reset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '200':
+          description: Request accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/password-reset/confirm:
+    post:
+      tags: [Auth]
+      summary: Confirm password reset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+      responses:
+        '200':
+          description: Password reset complete
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '401':
+          description: Invalid token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/email/verify:
+    post:
+      tags: [Auth]
+      summary: Verify email token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailRequest'
+      responses:
+        '200':
+          description: Email verified
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '401':
+          description: Invalid token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/email/resend:
+    post:
+      tags: [Auth]
+      summary: Resend verification email
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Verification email re-sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '400':
+          description: Email service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/oauth/{provider}:
+    get:
+      tags: [Auth]
+      summary: Get OAuth URL
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, twitter]
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: URL created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthUrlResponse' }
+        '400':
+          description: Invalid provider
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/oauth/{provider}/callback:
+    get:
+      tags: [Auth]
+      summary: OAuth callback redirect
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [google, twitter]
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to frontend callback
+        '400':
+          description: Callback error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: Invalid OAuth state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /auth/exchange-code:
+    post:
+      tags: [Auth]
+      summary: Exchange short auth code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeCodeRequest'
+      responses:
+        '200':
+          description: Tokens payload
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExchangeCodeResponse' }
+        '401':
+          description: Invalid/expired code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMe' }
+    patch:
+      tags: [Users]
+      summary: Update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserMe' }
+        '400':
+          description: Invalid input or username cooldown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Username conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/me/rooms:
+    get:
+      tags: [Users]
+      summary: Get rooms created by current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /users/search:
+    get:
+      tags: [Users]
+      summary: Search users
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    username: { type: string }
+                    displayName: { type: string }
+                    avatarUrl: { type: string, nullable: true }
+                    bio: { type: string, nullable: true }
+        '400':
+          description: Query missing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/{username}:
+    get:
+      tags: [Users]
+      summary: Get public profile by username
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Public profile
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/{id}/follow:
+    post:
+      tags: [Users]
+      summary: Follow user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Followed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      tags: [Users]
+      summary: Unfollow user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Unfollowed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '404':
+          description: Not following
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/{id}/followers:
+    get:
+      tags: [Users]
+      summary: Get followers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Followers list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  total: { type: integer }
+
+  /users/{id}/following:
+    get:
+      tags: [Users]
+      summary: Get following users
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Following list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  total: { type: integer }
+
+  /users/{id}/block:
+    post:
+      tags: [Users]
+      summary: Block user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Blocked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      tags: [Users]
+      summary: Unblock user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Unblocked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+        '404':
+          description: Not blocked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /users/me/notifications:
+    get:
+      tags: [Users]
+      summary: Get notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  unreadCount: { type: integer }
+
+  /users/me/notifications/{id}/read:
+    patch:
+      tags: [Users]
+      summary: Mark one notification as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Marked read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /users/me/notifications/read-all:
+    patch:
+      tags: [Users]
+      summary: Mark all notifications as read
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Marked read
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessResponse' }
+
+  /rooms/categories:
+    get:
+      tags: [Rooms]
+      summary: Get room categories
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /rooms/search:
+    get:
+      tags: [Rooms]
+      summary: Search rooms
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: language
+          in: query
+          schema: { type: string, enum: [tr, en] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rooms:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+
+  /rooms:
+    post:
+      tags: [Rooms]
+      summary: Create room
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomCreateRequest'
+      responses:
+        '201':
+          description: Room created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomSummary' }
+        '503':
+          description: LiveKit provisioning failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    get:
+      tags: [Rooms]
+      summary: List rooms
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: language
+          in: query
+          schema: { type: string, enum: [tr, en] }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated rooms
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  pagination:
+                    type: object
+                    additionalProperties: true
+
+  /rooms/featured:
+    get:
+      tags: [Rooms]
+      summary: Get featured rooms
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: Featured rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /rooms/trending:
+    get:
+      tags: [Rooms]
+      summary: Get trending rooms
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: Trending rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+
+  /rooms/{id}:
+    get:
+      tags: [Rooms]
+      summary: Get room detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Room detail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Room not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    patch:
+      tags: [Rooms]
+      summary: Update room settings (owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomUpdateRequest'
+      responses:
+        '200':
+          description: Updated room
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomSummary' }
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      tags: [Rooms]
+      summary: Close room (owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /rooms/{id}/participants:
+    get:
+      tags: [Rooms]
+      summary: Get participants grouped by roles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Grouped participants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  owner:
+                    type: object
+                    nullable: true
+                    additionalProperties: true
+                  moderators:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  speakers:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  listeners:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  /rooms/{id}/join:
+    post:
+      tags: [Rooms]
+      summary: Join room and receive media token
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomJoinResponse' }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: LiveKit unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /rooms/{id}/leave:
+    post:
+      tags: [Rooms]
+      summary: Leave room (owner starts grace period)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Left room
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /rooms/{id}/invite-speak:
+    post:
+      tags: [Rooms]
+      summary: Invite listener to speak
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetUserId]
+              properties:
+                targetUserId: { type: string }
+      responses:
+        '200':
+          description: Invite sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /rooms/{id}/invite-speak/accept:
+    post:
+      tags: [Rooms]
+      summary: Accept speak invitation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /rooms/{id}/invite-speak/decline:
+    post:
+      tags: [Rooms]
+      summary: Decline speak invitation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Declined
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /rooms/{id}/invite:
+    post:
+      tags: [Rooms]
+      summary: Invite user to private room
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetUserId]
+              properties:
+                targetUserId: { type: string }
+      responses:
+        '200':
+          description: Invite sent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/mute/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Mute user (moderator+)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Muted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/unmute/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Unmute user (moderator+)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Unmuted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/kick/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Kick user (moderator+)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Kicked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/promote/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Promote listener to speaker
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Promoted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/demote/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Demote to listener
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Demoted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/add-moderator/{roomId}/{userId}:
+    post:
+      tags: [Moderation]
+      summary: Add moderator (owner only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Moderator added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/remove-moderator/{roomId}/{userId}:
+    delete:
+      tags: [Moderation]
+      summary: Remove moderator (owner only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Moderator removed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+
+  /moderation/report:
+    post:
+      tags: [Moderation]
+      summary: Submit moderation report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/ReportUserRequest'
+                - $ref: '#/components/schemas/ReportRoomRequest'
+      responses:
+        '201':
+          description: Report submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  reportId: { type: integer }
+        '400':
+          description: Validation/duplicate report error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /moderation/reports:
+    get:
+      tags: [Moderation]
+      summary: List reports (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, under_review, resolved, dismissed]
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Reports list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportListResponse' }
+        '403':
+          description: Admin required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /moderation/reports/{id}:
+    get:
+      tags: [Moderation]
+      summary: Get report by id (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Report detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /moderation/reports/{id}/resolve:
+    patch:
+      tags: [Moderation]
+      summary: Resolve report (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  report: { $ref: '#/components/schemas/Report' }
+
+  /moderation/reports/{id}/dismiss:
+    patch:
+      tags: [Moderation]
+      summary: Dismiss report (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Dismissed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  report: { $ref: '#/components/schemas/Report' }
+
+  /moderation/audit/room/{roomId}:
+    get:
+      tags: [Moderation]
+      summary: Get room audit logs (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLog' }
+
+  /moderation/audit/user/{userId}:
+    get:
+      tags: [Moderation]
+      summary: Get user audit logs (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLog' }

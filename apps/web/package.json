@@ -1,0 +1,37 @@
+{
+  "name": "debate-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "generate:types": "openapi-typescript ../../src/docs/openapi.yaml -o ./lib/api/openapi.d.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.64.0",
+    "clsx": "^2.1.1",
+    "livekit-client": "^2.15.6",
+    "lucide-react": "^0.469.0",
+    "next": "^15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io-client": "^4.8.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/react": "^19.0.3",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.5.12",
+    "openapi-typescript": "^7.5.2",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.7.2"
+  }
+}
