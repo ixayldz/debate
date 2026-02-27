@@ -90,6 +90,7 @@ export function createLiveRoomConnection(onParticipantChanged?: () => void): Liv
   }
 
   room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication) => {
+    void room.startAudio().catch(() => undefined);
     attachAudioTrack(track, publication);
   });
 

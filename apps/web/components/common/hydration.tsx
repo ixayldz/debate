@@ -7,19 +7,21 @@ import { getMe } from '@/lib/api/users-api';
 
 export function HydrationMarker() {
   const hydrated = useAuthStore((state) => state.hydrated);
-  const setHydrated = useAuthStore((state) => state.setHydrated);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const user = useAuthStore((state) => state.user);
   const updateUser = useAuthStore((state) => state.updateUser);
 
   useEffect(() => {
-    if (hydrated) {
+    // Wait until persist rehydration finishes before deciding auth restore flow.
+    if (!hydrated) {
       return;
     }
 
     let active = true;
 
     const restoreSession = async () => {
-      if (!accessToken) {
+      // Avoid noisy refresh attempts for brand-new visitors with no prior session signal.
+      if (!accessToken && user) {
         const refreshedToken = await refreshAccessToken();
         if (refreshedToken) {
           try {
@@ -41,10 +43,6 @@ export function HydrationMarker() {
           }
         }
       }
-
-      if (active) {
-        setHydrated(true);
-      }
     };
 
     void restoreSession();
@@ -52,7 +50,7 @@ export function HydrationMarker() {
     return () => {
       active = false;
     };
-  }, [accessToken, hydrated, setHydrated, updateUser]);
+  }, [accessToken, hydrated, updateUser, user]);
 
   return null;
 }

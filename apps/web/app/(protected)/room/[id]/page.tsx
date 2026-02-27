@@ -14,14 +14,21 @@ import { createLiveRoomConnection, type LiveRoomConnection } from '@/lib/realtim
 import {
   acceptSpeakInvite,
   closeRoom,
+  getMicQueue,
+  acceptMicRequest,
+  cancelMicRequest,
   declineSpeakInvite,
   flattenParticipants,
   getRoomById,
+  getPendingSpeakInvite,
   getRoomParticipants,
+  getRoomMediaToken,
   inviteToSpeak,
   inviteToPrivateRoom,
   joinRoom,
   leaveRoom,
+  requestMic,
+  rejectMicRequest,
   updateRoom,
 } from '@/lib/api/rooms-api';
 import {
@@ -125,6 +132,7 @@ export default function RoomPage() {
   const micSocketRef = useRef<Socket | null>(null);
   const livekitRef = useRef<LiveRoomConnection | null>(null);
   const leavingRef = useRef(false);
+  const joiningRef = useRef(false);
   const joinedRef = useRef(false);
 
   const [isJoined, setIsJoined] = useState(false);
@@ -160,14 +168,16 @@ export default function RoomPage() {
     queryFn: () => getRoomById(roomId),
     enabled: Boolean(roomId),
     staleTime: 20_000,
+    refetchInterval: 15_000,
     refetchOnWindowFocus: false,
   });
 
   const participantsQuery = useQuery({
     queryKey: ['room', roomId, 'participants'],
     queryFn: () => getRoomParticipants(roomId),
-    enabled: Boolean(roomId) && isJoined,
+    enabled: Boolean(roomId) && Boolean(accessToken),
     staleTime: 30_000,
+    refetchInterval: isJoined ? 5_000 : false,
     refetchOnWindowFocus: false,
     retry: 1,
   });
@@ -203,17 +213,40 @@ export default function RoomPage() {
     return map;
   }, [participants]);
 
+  const roomCreatorId = Number(roomQuery.data?.createdBy?.id || 0);
+  const isRoomCreator = roomCreatorId > 0 && roomCreatorId === Number(me?.id || 0);
+
+  const fallbackOwnerParticipant = useMemo<RoomParticipant | null>(() => {
+    if (!isRoomCreator || !me) {
+      return null;
+    }
+
+    return {
+      user_id: Number(me.id),
+      role: 'owner_moderator',
+      is_muted: false,
+      username: me.username,
+      display_name: me.displayName || me.display_name || me.username,
+      avatar_url: me.avatarUrl || me.avatar_url || null,
+    };
+  }, [isRoomCreator, me]);
+
   const stageParticipants = useMemo(() => {
     if (!participantsState) {
-      return [] as RoomParticipant[];
+      return fallbackOwnerParticipant ? [fallbackOwnerParticipant] : [];
     }
     const owner = participantsState.owner ? [participantsState.owner] : [];
-    return [...owner, ...participantsState.moderators, ...participantsState.speakers];
-  }, [participantsState]);
+    const merged = [...owner, ...participantsState.moderators, ...participantsState.speakers];
+    if (merged.length === 0 && fallbackOwnerParticipant) {
+      return [fallbackOwnerParticipant];
+    }
+    return merged;
+  }, [fallbackOwnerParticipant, participantsState]);
 
   const listenerParticipants = participantsState?.listeners || [];
   const meParticipant = participantsById.get(Number(me?.id || 0));
-  const effectiveRole = meParticipant?.role || myRole;
+  const meParticipantRole = meParticipant?.role;
+  const effectiveRole: UserRole = meParticipant?.role || (isRoomCreator ? 'owner_moderator' : myRole);
   const isOwner = effectiveRole === 'owner_moderator';
   const isModerator = effectiveRole === 'owner_moderator' || effectiveRole === 'moderator';
   const canSpeak = effectiveRole === 'owner_moderator' || effectiveRole === 'moderator' || effectiveRole === 'speaker';
@@ -295,22 +328,78 @@ export default function RoomPage() {
 
   const acceptSpeakInviteMutation = useMutation({
     mutationFn: () => acceptSpeakInvite(roomId),
-    onSuccess: () => {
-      setStatusText('Speak invite accepted.');
+    onSuccess: (result) => {
+      setStatusText(result.message || 'Speak invite handled.');
       void syncParticipants();
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'speak-invite-pending'] });
     },
     onError: (error) => {
       setStatusText(error instanceof Error ? error.message : 'No pending invite.');
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'speak-invite-pending'] });
     },
   });
 
   const declineSpeakInviteMutation = useMutation({
     mutationFn: () => declineSpeakInvite(roomId),
-    onSuccess: () => {
-      setStatusText('Speak invite declined.');
+    onSuccess: (result) => {
+      setStatusText(result.message || 'Speak invite handled.');
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'speak-invite-pending'] });
     },
     onError: (error) => {
       setStatusText(error instanceof Error ? error.message : 'No pending invite.');
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'speak-invite-pending'] });
+    },
+  });
+
+  const requestMicMutation = useMutation({
+    mutationFn: () => requestMic(roomId),
+    onSuccess: (result) => {
+      setMicRequested(true);
+      setMicQueue(result.queue || []);
+      setStatusText('Mic request queued.');
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'mic-queue'] });
+    },
+    onError: (error) => {
+      setStatusText(error instanceof Error ? error.message : 'Failed to request mic.');
+    },
+  });
+
+  const cancelMicMutation = useMutation({
+    mutationFn: () => cancelMicRequest(roomId),
+    onSuccess: (result) => {
+      setMicRequested(false);
+      setMicQueue(result.queue || []);
+      setStatusText('Mic request cancelled.');
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'mic-queue'] });
+    },
+    onError: (error) => {
+      setStatusText(error instanceof Error ? error.message : 'Failed to cancel mic request.');
+    },
+  });
+
+  const acceptMicRequestMutation = useMutation({
+    mutationFn: (requestId: string) => acceptMicRequest(roomId, requestId),
+    onSuccess: (result) => {
+      setMicQueue(result.queue || []);
+      setStatusText('Request accepted.');
+      void syncParticipants();
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'mic-queue'] });
+    },
+    onError: (error) => {
+      setStatusText(error instanceof Error ? error.message : 'Failed to accept request.');
+    },
+  });
+
+  const rejectMicRequestMutation = useMutation({
+    mutationFn: (requestId: string) => rejectMicRequest(roomId, requestId),
+    onSuccess: (result) => {
+      setMicQueue(result.queue || []);
+      setStatusText('Request rejected.');
+      void syncParticipants();
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId, 'mic-queue'] });
+    },
+    onError: (error) => {
+      setStatusText(error instanceof Error ? error.message : 'Failed to reject request.');
     },
   });
 
@@ -331,31 +420,107 @@ export default function RoomPage() {
     }
   }, [queryClient, roomId]);
 
-  const leaveCurrentRoom = useCallback(async (redirectToHall: boolean) => {
+  const reconnectLivekitForCurrentRole = useCallback(async (preferredRole?: UserRole) => {
+    if (!roomId) {
+      return;
+    }
+
+    try {
+      const media = await getRoomMediaToken(roomId);
+      const resolvedRole = media.role || preferredRole || 'listener';
+      const token = media.token;
+
+      setMyRole(resolvedRole);
+      setIsMuted(true);
+
+      if (!token) {
+        setStatusText('Media token unavailable.');
+        return;
+      }
+
+      if (livekitRef.current) {
+        await livekitRef.current.disconnect();
+      }
+
+      const livekit = createLiveRoomConnection();
+      livekitRef.current = livekit;
+      await livekit.connect(token);
+
+      if (resolvedRole !== 'listener') {
+        await livekit.setMicrophoneEnabled(false);
+      }
+
+      console.info('[livekit] reconnect complete', { roomId, role: resolvedRole });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to refresh media session.';
+      console.error('[livekit] reconnect error', error);
+      setStatusText(message);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId || !accessToken) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void syncParticipants();
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [accessToken, roomId, syncParticipants]);
+
+  useEffect(() => {
+    if (!isJoined || !meParticipantRole) {
+      return;
+    }
+
+    if (meParticipantRole === myRole) {
+      return;
+    }
+
+    setMyRole(meParticipantRole);
+    setIsMuted(true);
+    void reconnectLivekitForCurrentRole(meParticipantRole);
+  }, [isJoined, meParticipantRole, myRole, reconnectLivekitForCurrentRole]);
+
+  const leaveCurrentRoom = useCallback(async (redirectToHall: boolean, explicitLeave = false) => {
     if (!roomId || leavingRef.current) {
       return;
     }
     leavingRef.current = true;
 
     try {
-      roomSocketRef.current?.disconnect();
-      micSocketRef.current?.disconnect();
-      await livekitRef.current?.disconnect();
-      if (joinedRef.current) {
+      if (explicitLeave) {
+        roomSocketRef.current?.emit('room:leave');
         await leaveRoom(roomId);
       }
+      roomSocketRef.current?.disconnect();
+      roomSocketRef.current = null;
+      micSocketRef.current?.disconnect();
+      micSocketRef.current = null;
+      await livekitRef.current?.disconnect();
+      livekitRef.current = null;
+      joiningRef.current = false;
       joinedRef.current = false;
       setIsJoined(false);
       setParticipantsState(null);
+      setSelectedParticipantId(null);
+      setMyRole('listener');
+      setIsMuted(true);
+      await queryClient.cancelQueries({ queryKey: ['room', roomId, 'participants'] });
+      queryClient.removeQueries({ queryKey: ['room', roomId, 'participants'] });
+      void queryClient.invalidateQueries({ queryKey: ['rooms'] });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to leave room.';
       setStatusText(message);
     } finally {
+      leavingRef.current = false;
       if (redirectToHall) {
         router.replace('/hall');
       }
     }
-  }, [roomId, router]);
+  }, [queryClient, roomId, router]);
 
   type RoomJoinedSocketPayload = {
     roomId: string;
@@ -394,15 +559,46 @@ export default function RoomPage() {
     serverTs?: number;
   };
 
+  type RoomRoleChangedPayload = {
+    roomId: string;
+    userId: string;
+    role: UserRole;
+    serverTs?: number;
+  };
+
+  type MicRequestHandledPayload = {
+    roomId: string;
+    requestId: string;
+    action: 'accepted' | 'rejected';
+    targetUserId?: string;
+  };
+
+  type MicRequestResultPayload = {
+    roomId: string;
+    requestId: string;
+    action: 'accepted' | 'rejected';
+  };
+
+  type RoomMicQueuePayload = {
+    roomId: string;
+    queue: MicRequestItem[];
+  };
+
   useEffect(() => {
-    if (!roomId || !accessToken) {
+    const sessionToken = useAuthStore.getState().accessToken;
+    if (!roomId || !sessionToken) {
+      return;
+    }
+    if (joinedRef.current || joiningRef.current) {
       return;
     }
 
     let active = true;
 
     const setupRealtime = async () => {
+      joiningRef.current = true;
       try {
+        setJoinError('');
         const joined = await joinRoom(roomId);
         if (!active) {
           return;
@@ -414,11 +610,24 @@ export default function RoomPage() {
         setStatusText('Connected to room.');
         void syncParticipants();
 
-        const roomSocket = createRoomSocket(accessToken);
+        const socketToken = useAuthStore.getState().accessToken || sessionToken;
+        const roomSocket = createRoomSocket(socketToken);
         roomSocketRef.current = roomSocket;
 
-        roomSocket.on('connect', () => {
+        const emitRoomJoin = () => {
           roomSocket.emit('room:join', { roomId });
+        };
+
+        roomSocket.on('connect', emitRoomJoin);
+        if (roomSocket.connected) {
+          emitRoomJoin();
+        }
+
+        roomSocket.on('connect_error', (error) => {
+          console.error('[room-socket] connect_error', error);
+          const message = error?.message || 'Room realtime connection failed.';
+          setJoinError(message);
+          setStatusText(message);
         });
 
         roomSocket.on('room:joined', (payload: RoomJoinedSocketPayload) => {
@@ -458,6 +667,26 @@ export default function RoomPage() {
           }
         });
 
+        roomSocket.on('room:role_changed', (payload: RoomRoleChangedPayload) => {
+          const changedUserId = Number(payload?.userId);
+          if (Number.isNaN(changedUserId)) {
+            return;
+          }
+
+          const currentUserId = Number(useAuthStore.getState().user?.id || 0);
+          if (changedUserId === currentUserId) {
+            setMyRole(payload.role);
+            setIsMuted(true);
+            void reconnectLivekitForCurrentRole(payload.role);
+          }
+
+          void syncParticipants();
+        });
+
+        roomSocket.on('room:mic_queue_updated', (payload: RoomMicQueuePayload) => {
+          setMicQueue(payload.queue || []);
+        });
+
         roomSocket.on('room:grace_period', (payload: { endsAt: number }) => {
           setGraceEndsAt(payload.endsAt);
           setStatusText('Owner disconnected. Grace period started.');
@@ -469,16 +698,27 @@ export default function RoomPage() {
         });
 
         roomSocket.on('room:error', (payload: { message: string }) => {
+          console.error('[room-socket] room:error', payload);
           setStatusText(payload.message);
         });
 
-        const micSocket = createMicSocket(accessToken);
+        const micSocket = createMicSocket(socketToken);
         micSocketRef.current = micSocket;
 
-        micSocket.on('connect', () => {
+        const emitMicJoin = () => {
           micSocket.emit('mic:join_room', { roomId });
           micSocket.emit('mic:get_queue', { roomId });
           micSocket.emit('mic:get_cooldown', { roomId });
+        };
+
+        micSocket.on('connect', emitMicJoin);
+        if (micSocket.connected) {
+          emitMicJoin();
+        }
+
+        micSocket.on('connect_error', (error) => {
+          console.error('[mic-socket] connect_error', error);
+          setStatusText(error?.message || 'Mic realtime connection failed.');
         });
 
         micSocket.on('mic:queue', (payload: { queue: MicRequestItem[] }) => {
@@ -500,11 +740,23 @@ export default function RoomPage() {
           setStatusText('Mic request cancelled.');
         });
 
-        micSocket.on('mic:request_handled', (payload: { action: 'accepted' | 'rejected' }) => {
-          setMicRequested(false);
+        micSocket.on('mic:request_handled', (payload: MicRequestHandledPayload) => {
           setStatusText(payload.action === 'accepted' ? 'Request accepted.' : 'Request rejected.');
           void syncParticipants();
-          micSocket.emit('mic:get_cooldown', { roomId });
+          micSocket.emit('mic:get_queue', { roomId });
+        });
+
+        micSocket.on('mic:request_result', (payload: MicRequestResultPayload) => {
+          setMicRequested(false);
+          setStatusText(payload.action === 'accepted' ? 'Request accepted.' : 'Request rejected.');
+
+          if (payload.action === 'accepted') {
+            void reconnectLivekitForCurrentRole('speaker');
+          } else {
+            micSocket.emit('mic:get_cooldown', { roomId });
+          }
+
+          void syncParticipants();
         });
 
         micSocket.on('mic:cooldown', (payload: { cooldownEndTime: number | null }) => {
@@ -512,6 +764,7 @@ export default function RoomPage() {
         });
 
         micSocket.on('mic:error', (payload: { message: string }) => {
+          console.error('[mic-socket] mic:error', payload);
           setStatusText(payload.message);
         });
 
@@ -519,7 +772,9 @@ export default function RoomPage() {
           const livekit = createLiveRoomConnection();
           livekitRef.current = livekit;
           await livekit.connect(joined.token);
-          await livekit.setMicrophoneEnabled(false);
+          if (joined.role !== 'listener') {
+            await livekit.setMicrophoneEnabled(false);
+          }
         }
       } catch (error) {
         if (!active) {
@@ -527,6 +782,8 @@ export default function RoomPage() {
         }
         const message = error instanceof Error ? error.message : 'Could not join room.';
         setJoinError(message);
+      } finally {
+        joiningRef.current = false;
       }
     };
 
@@ -534,18 +791,38 @@ export default function RoomPage() {
 
     return () => {
       active = false;
-      void leaveCurrentRoom(false);
+      void leaveCurrentRoom(false, false);
     };
-  }, [accessToken, leaveCurrentRoom, roomId, syncParticipants]);
+  }, [leaveCurrentRoom, reconnectLivekitForCurrentRole, roomId, syncParticipants]);
 
   const toggleMic = async () => {
+    if (!canSpeak) {
+      return;
+    }
+
     const previousMuted = isMuted;
     const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    roomSocketRef.current?.emit('mic:toggle', { roomId, muted: nextMuted });
+
     try {
-      await livekitRef.current?.startAudio();
-      await livekitRef.current?.setMicrophoneEnabled(!nextMuted);
+      if (!nextMuted) {
+        const media = await getRoomMediaToken(roomId);
+        if (media.role === 'listener') {
+          throw new Error('You are still listener. Ask for speaker permission first.');
+        }
+      }
+
+      if (!livekitRef.current) {
+        await reconnectLivekitForCurrentRole(effectiveRole);
+      }
+
+      if (!livekitRef.current) {
+        throw new Error('Media connection is not ready.');
+      }
+
+      await livekitRef.current.startAudio();
+      await livekitRef.current.setMicrophoneEnabled(!nextMuted);
+      setIsMuted(nextMuted);
+      roomSocketRef.current?.emit('mic:toggle', { roomId, muted: nextMuted });
     } catch (error) {
       setIsMuted(previousMuted);
       setStatusText(error instanceof Error ? error.message : 'Failed to update microphone state.');
@@ -553,19 +830,29 @@ export default function RoomPage() {
   };
 
   const handleQueueRequest = () => {
-    micSocketRef.current?.emit('mic:request', { roomId });
+    requestMicMutation.mutate();
   };
 
   const handleQueueCancel = () => {
-    micSocketRef.current?.emit('mic:cancel', { roomId });
+    cancelMicMutation.mutate();
   };
 
   const handleQueueAccept = (requestId: string) => {
-    micSocketRef.current?.emit('mic:accept', { roomId, requestId });
+    const micSocket = micSocketRef.current;
+    if (micSocket) {
+      micSocket.emit('mic:accept', { roomId, requestId });
+      return;
+    }
+    acceptMicRequestMutation.mutate(requestId);
   };
 
   const handleQueueReject = (requestId: string) => {
-    micSocketRef.current?.emit('mic:reject', { roomId, requestId });
+    const micSocket = micSocketRef.current;
+    if (micSocket) {
+      micSocket.emit('mic:reject', { roomId, requestId });
+      return;
+    }
+    rejectMicRequestMutation.mutate(requestId);
   };
 
   const runParticipantAction = async (
@@ -581,6 +868,32 @@ export default function RoomPage() {
       setStatusText(error instanceof Error ? error.message : 'Action failed.');
     }
   };
+
+  const pendingInviteQuery = useQuery({
+    queryKey: ['room', roomId, 'speak-invite-pending'],
+    queryFn: () => getPendingSpeakInvite(roomId),
+    enabled: Boolean(roomId) && isJoined,
+    staleTime: 3_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+    retry: 0,
+  });
+
+  const micQueueQuery = useQuery({
+    queryKey: ['room', roomId, 'mic-queue'],
+    queryFn: () => getMicQueue(roomId),
+    enabled: Boolean(roomId) && Boolean(accessToken) && isModerator,
+    staleTime: 1_000,
+    refetchInterval: 2_000,
+    refetchOnWindowFocus: true,
+    retry: 0,
+  });
+
+  useEffect(() => {
+    if (micQueueQuery.data?.queue) {
+      setMicQueue(micQueueQuery.data.queue);
+    }
+  }, [micQueueQuery.data]);
 
   if (!roomId) {
     return (
@@ -599,7 +912,7 @@ export default function RoomPage() {
         <button
           type="button"
           className="rounded-full border border-border bg-muted p-2"
-          onClick={() => void leaveCurrentRoom(true)}
+          onClick={() => void leaveCurrentRoom(true, true)}
         >
           <DoorOpen className="h-4 w-4" />
         </button>
@@ -624,6 +937,13 @@ export default function RoomPage() {
         ) : null}
         {joinError ? <p className="text-xs text-red-600">{joinError}</p> : null}
         {statusText ? <p className="text-xs text-text/70">{statusText}</p> : null}
+      </Card>
+
+      <Card>
+        <Button type="button" className="flex items-center justify-center gap-2" onClick={() => void leaveCurrentRoom(true, true)}>
+          <DoorOpen className="h-4 w-4" />
+          Odadan Ayril
+        </Button>
       </Card>
 
       <Card className="space-y-3">
@@ -833,24 +1153,28 @@ export default function RoomPage() {
               Request Mic
             </Button>
           )}
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              className="py-2 text-xs"
-              onClick={() => acceptSpeakInviteMutation.mutate()}
-              disabled={acceptSpeakInviteMutation.isPending}
-            >
-              {acceptSpeakInviteMutation.isPending ? 'Accepting...' : 'Accept Invite'}
-            </Button>
-            <Button
-              type="button"
-              className="py-2 text-xs bg-muted"
-              onClick={() => declineSpeakInviteMutation.mutate()}
-              disabled={declineSpeakInviteMutation.isPending}
-            >
-              {declineSpeakInviteMutation.isPending ? 'Declining...' : 'Decline Invite'}
-            </Button>
-          </div>
+          {pendingInviteQuery.data?.pending ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                className="py-2 text-xs"
+                onClick={() => acceptSpeakInviteMutation.mutate()}
+                disabled={acceptSpeakInviteMutation.isPending}
+              >
+                {acceptSpeakInviteMutation.isPending ? 'Accepting...' : 'Accept Invite'}
+              </Button>
+              <Button
+                type="button"
+                className="py-2 text-xs bg-muted"
+                onClick={() => declineSpeakInviteMutation.mutate()}
+                disabled={declineSpeakInviteMutation.isPending}
+              >
+                {declineSpeakInviteMutation.isPending ? 'Declining...' : 'Decline Invite'}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-text/65">No pending speak invite.</p>
+          )}
         </Card>
       )}
 

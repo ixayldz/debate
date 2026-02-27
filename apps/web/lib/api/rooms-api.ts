@@ -8,6 +8,8 @@ import type {
   RoomJoinResponse,
   RoomLeaveResponse,
   RoomListParams,
+  RoomMediaTokenResponse,
+  MicRequestItem,
   RoomParticipant,
   RoomParticipantsResponse,
   RoomSearchParams,
@@ -104,6 +106,49 @@ export function leaveRoom(id: string) {
   });
 }
 
+export function getRoomMediaToken(id: string) {
+  return apiRequest<RoomMediaTokenResponse>(`/rooms/${id}/media-token`, {
+    method: 'POST',
+    auth: true,
+  });
+}
+
+export function requestMic(id: string) {
+  return apiRequest<{ success: boolean; queue: MicRequestItem[] }>(`/rooms/${id}/mic/request`, {
+    method: 'POST',
+    auth: true,
+  });
+}
+
+export function cancelMicRequest(id: string) {
+  return apiRequest<{ success: boolean; queue: MicRequestItem[] }>(`/rooms/${id}/mic/request`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
+export function getMicQueue(id: string) {
+  return apiRequest<{ queue: MicRequestItem[] }>(`/rooms/${id}/mic/queue`, {
+    auth: true,
+  });
+}
+
+export function acceptMicRequest(id: string, requestId: string) {
+  return apiRequest<{ success: boolean; queue: MicRequestItem[] }>(`/rooms/${id}/mic/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ requestId }),
+    auth: true,
+  });
+}
+
+export function rejectMicRequest(id: string, requestId: string) {
+  return apiRequest<{ success: boolean; queue: MicRequestItem[] }>(`/rooms/${id}/mic/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ requestId }),
+    auth: true,
+  });
+}
+
 export function inviteToSpeak(id: string, targetUserId: string) {
   return apiRequest<ApiMessageResponse>(`/rooms/${id}/invite-speak`, {
     method: 'POST',
@@ -122,6 +167,12 @@ export function acceptSpeakInvite(id: string) {
 export function declineSpeakInvite(id: string) {
   return apiRequest<ApiMessageResponse>(`/rooms/${id}/invite-speak/decline`, {
     method: 'POST',
+    auth: true,
+  });
+}
+
+export function getPendingSpeakInvite(id: string) {
+  return apiRequest<{ pending: boolean }>(`/rooms/${id}/invite-speak/pending`, {
     auth: true,
   });
 }

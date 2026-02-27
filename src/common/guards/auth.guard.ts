@@ -8,11 +8,11 @@ export interface AuthenticatedRequest extends Request {
   user?: TokenPayload;
 }
 
-export function authGuard(
+export async function authGuard(
   req: AuthenticatedRequest,
   _res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
 
@@ -28,11 +28,20 @@ export function authGuard(
       throw new UnauthorizedError('Invalid token payload');
     }
 
+    const user = await userRepository.findById(parsedUserId);
+    if (!user) {
+      throw new UnauthorizedError('Session is no longer valid. Please login again.');
+    }
+
     payload.userId = parsedUserId.toString();
 
     req.user = payload;
     next();
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      next(error);
+      return;
+    }
     next(new UnauthorizedError('Invalid token'));
   }
 }

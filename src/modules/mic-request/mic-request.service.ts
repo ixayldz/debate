@@ -108,7 +108,7 @@ export class MicRequestService {
     roomId: string,
     requestId: string,
     moderatorId: string
-  ): Promise<void> {
+  ): Promise<MicRequest> {
     const moderator = await roomService.getParticipant(roomId, moderatorId);
 
     if (moderator.role !== UserRole.OWNER_MODERATOR && moderator.role !== UserRole.MODERATOR) {
@@ -134,9 +134,10 @@ export class MicRequestService {
     await roomService.changeRole(roomId, request.userId, UserRole.SPEAKER, moderatorId);
 
     logger.info({ roomId, requestId, moderatorId }, 'Mic request accepted');
+    return request;
   }
 
-  async rejectRequest(roomId: string, requestId: string, moderatorId: string): Promise<void> {
+  async rejectRequest(roomId: string, requestId: string, moderatorId: string): Promise<MicRequest> {
     const moderator = await roomService.getParticipant(roomId, moderatorId);
 
     if (moderator.role !== UserRole.OWNER_MODERATOR && moderator.role !== UserRole.MODERATOR) {
@@ -154,6 +155,7 @@ export class MicRequestService {
     await this.startCooldown(roomId, request.userId);
 
     logger.info({ roomId, requestId, moderatorId }, 'Mic request rejected');
+    return request;
   }
 
   async startCooldown(roomId: string, userId: string): Promise<void> {

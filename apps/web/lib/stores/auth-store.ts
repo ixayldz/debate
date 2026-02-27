@@ -39,6 +39,7 @@ export const useAuthStore = create<AuthState>()(
       name: 'debate-web-auth',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        accessToken: state.accessToken,
         user: state.user,
       }),
       onRehydrateStorage: () => (state) => {

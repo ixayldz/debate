@@ -107,6 +107,8 @@ interface Config {
     maxSpeakersDefault: number;
     micRequestCooldownSeconds: number;
     inviteExpirySeconds: number;
+    emptyRoomSweepSeconds: number;
+    emptyRoomMinAgeSeconds: number;
   };
   health: {
     strictExternals: boolean;
@@ -159,6 +161,31 @@ function parseSameSite(value: string | undefined): 'lax' | 'strict' | 'none' {
   return 'lax';
 }
 
+function isLocalhostLikeUrl(value: string | undefined): boolean {
+  if (!value || value.trim() === '') {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function resolveRefreshCookieSecureDefault(nodeEnv: string): boolean {
+  if (nodeEnv !== 'production') {
+    return false;
+  }
+
+  const frontendUrl = process.env.FRONTEND_URL;
+  const apiUrl = process.env.API_URL;
+  const localRuntime = isLocalhostLikeUrl(frontendUrl) && isLocalhostLikeUrl(apiUrl);
+  return !localRuntime;
+}
+
 function validateRequired(): void {
   const missing: string[] = [];
   const nodeEnv = process.env.NODE_ENV || 'development';
@@ -173,9 +200,10 @@ function validateRequired(): void {
     : process.env.REDIS_HOST;
   const jwtSecret = process.env.JWT_SECRET || '';
   const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET || '';
-  const refreshCookieSecure = isProd
-    ? true
-    : parseBoolean(process.env.REFRESH_COOKIE_SECURE, false);
+  const refreshCookieSecure = parseBoolean(
+    process.env.REFRESH_COOKIE_SECURE,
+    resolveRefreshCookieSecureDefault(nodeEnv)
+  );
   const refreshCookieSameSite = parseSameSite(process.env.REFRESH_COOKIE_SAMESITE);
 
   if (!databaseUrl) missing.push(isTest ? 'TEST_DATABASE_URL or DATABASE_URL' : 'DATABASE_URL');
@@ -343,10 +371,10 @@ export const config: Config = {
   auth: {
     refreshCookieName: process.env.REFRESH_COOKIE_NAME || 'debate_refresh',
     refreshCookieDomain: process.env.REFRESH_COOKIE_DOMAIN?.trim() || undefined,
-    refreshCookieSecure:
-      process.env.NODE_ENV === 'production'
-        ? true
-        : parseBoolean(process.env.REFRESH_COOKIE_SECURE, false),
+    refreshCookieSecure: parseBoolean(
+      process.env.REFRESH_COOKIE_SECURE,
+      resolveRefreshCookieSecureDefault(process.env.NODE_ENV || 'development')
+    ),
     refreshCookieSameSite: parseSameSite(process.env.REFRESH_COOKIE_SAMESITE),
     refreshCookieMaxAgeMs: parseNumber(process.env.REFRESH_COOKIE_MAX_AGE_MS, 30 * 24 * 60 * 60 * 1000),
   },
@@ -356,6 +384,8 @@ export const config: Config = {
     maxSpeakersDefault: parseInt(process.env.MAX_SPEAKERS_DEFAULT || '6', 10),
     micRequestCooldownSeconds: parseInt(process.env.MIC_REQUEST_COOLDOWN_SECONDS || '60', 10),
     inviteExpirySeconds: parseInt(process.env.INVITE_EXPIRY_SECONDS || '60', 10),
+    emptyRoomSweepSeconds: parseInt(process.env.EMPTY_ROOM_SWEEP_SECONDS || '30', 10),
+    emptyRoomMinAgeSeconds: parseInt(process.env.EMPTY_ROOM_MIN_AGE_SECONDS || '45', 10),
   },
 
   health: {

@@ -189,6 +189,12 @@ export interface RoomJoinResponse {
   micRequestsEnabled: boolean;
 }
 
+export interface RoomMediaTokenResponse {
+  roomId: string;
+  role: UserRole;
+  token: string;
+}
+
 export interface RoomLeaveResponse {
   message: string;
   gracePeriodEnd?: number;

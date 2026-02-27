@@ -211,6 +211,7 @@ async function handleUserLeave(
       participant = await roomService.getParticipant(roomId, userId);
     } catch {
       await roomService.removeParticipant(roomId, userId);
+      await emitRoomSyncState(io, roomId);
       socket.leave(roomId);
       socket.roomId = undefined;
       return;
@@ -260,7 +261,12 @@ async function handleUserDisconnect(
   try {
     const presence = await redisClient.getClient().hget(RedisKeys.roomPresence(roomId), userId);
 
-    if (!presence) return;
+    if (!presence) {
+      await emitRoomSyncState(io, roomId);
+      socket.leave(roomId);
+      socket.roomId = undefined;
+      return;
+    }
 
     const presenceData = JSON.parse(presence);
 
@@ -273,6 +279,7 @@ async function handleUserDisconnect(
       participant = await roomService.getParticipant(roomId, userId);
     } catch {
       await roomService.removeParticipant(roomId, userId);
+      await emitRoomSyncState(io, roomId);
       socket.leave(roomId);
       socket.roomId = undefined;
       return;

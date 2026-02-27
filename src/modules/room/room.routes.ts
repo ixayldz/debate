@@ -1,7 +1,14 @@
 import { Router, Response, NextFunction } from 'express';
 import { roomController } from './room.controller.js';
 import { roomService } from './room.service.js';
+import { micRequestService } from '../mic-request/mic-request.service.js';
 import { authGuard, AuthenticatedRequest } from '../../common/guards/auth.guard.js';
+import { UserRole } from '../../types/enums.js';
+import {
+  emitMicQueueUpdated,
+  emitMicRequestResult,
+  emitRoomRoleChanged,
+} from '../../config/socket-state.js';
 
 const router = Router();
 
@@ -53,6 +60,75 @@ router.post('/:id/leave', authGuard, (req: AuthenticatedRequest, res: Response, 
   roomController.leave(req, res, next);
 });
 
+router.post('/:id/media-token', authGuard, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  roomController.mediaToken(req, res, next);
+});
+
+router.post('/:id/mic/request', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.userId;
+    await micRequestService.addToQueue(id, userId);
+    const queue = await micRequestService.getQueue(id);
+    emitMicQueueUpdated(id, queue);
+    res.json({ success: true, queue });
+  } catch (error) { next(error); }
+});
+
+router.delete('/:id/mic/request', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.userId;
+    await micRequestService.removeFromQueue(id, userId);
+    const queue = await micRequestService.getQueue(id);
+    emitMicQueueUpdated(id, queue);
+    res.json({ success: true, queue });
+  } catch (error) { next(error); }
+});
+
+router.get('/:id/mic/queue', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const queue = await micRequestService.getQueue(id);
+    res.json({ queue });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/mic/accept', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { requestId } = req.body;
+    const userId = req.user!.userId;
+    const request = await micRequestService.acceptRequest(id, requestId, userId);
+    const queue = await micRequestService.getQueue(id);
+    emitMicQueueUpdated(id, queue);
+    emitMicRequestResult(request.userId, {
+      roomId: id,
+      requestId,
+      action: 'accepted',
+    });
+    emitRoomRoleChanged(id, request.userId, UserRole.SPEAKER);
+    res.json({ success: true, queue });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/mic/reject', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { requestId } = req.body;
+    const userId = req.user!.userId;
+    const request = await micRequestService.rejectRequest(id, requestId, userId);
+    const queue = await micRequestService.getQueue(id);
+    emitMicQueueUpdated(id, queue);
+    emitMicRequestResult(request.userId, {
+      roomId: id,
+      requestId,
+      action: 'rejected',
+    });
+    res.json({ success: true, queue });
+  } catch (error) { next(error); }
+});
+
 // Invite-to-speak flow
 router.post('/:id/invite-speak', authGuard, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
@@ -68,8 +144,11 @@ router.post('/:id/invite-speak/accept', authGuard, async (req: AuthenticatedRequ
   try {
     const { id } = req.params;
     const userId = req.user!.userId;
-    await roomService.acceptSpeakInvite(id, userId);
-    res.json({ success: true, message: 'Speaker invite accepted' });
+    const accepted = await roomService.acceptSpeakInvite(id, userId);
+    res.json({
+      success: accepted,
+      message: accepted ? 'Speaker invite accepted' : 'No pending speak invitation',
+    });
   } catch (error) { next(error); }
 });
 
@@ -77,9 +156,16 @@ router.post('/:id/invite-speak/decline', authGuard, async (req: AuthenticatedReq
   try {
     const { id } = req.params;
     const userId = req.user!.userId;
-    await roomService.declineSpeakInvite(id, userId);
-    res.json({ success: true, message: 'Speaker invite declined' });
+    const declined = await roomService.declineSpeakInvite(id, userId);
+    res.json({
+      success: declined,
+      message: declined ? 'Speaker invite declined' : 'No pending speak invitation',
+    });
   } catch (error) { next(error); }
+});
+
+router.get('/:id/invite-speak/pending', authGuard, (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  roomController.getPendingSpeakInvite(req, res, next);
 });
 
 // Private room invite
@@ -95,4 +181,3 @@ router.post('/:id/invite', authGuard, async (req: AuthenticatedRequest, res: Res
 
 export const roomRoutes = router;
 export default roomRoutes;
-

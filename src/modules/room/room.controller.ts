@@ -163,6 +163,7 @@ export class RoomController {
     try {
       const { id } = req.params;
       const userId = req.user!.userId;
+      const numericUserId = parseInt(userId, 10);
 
       const room = await roomService.findById(id);
 
@@ -170,7 +171,12 @@ export class RoomController {
         throw new BadRequestError('Room has ended');
       }
 
-      const participant = await roomService.addParticipant(id, userId, UserRole.LISTENER);
+      const desiredRole =
+        room.created_by === numericUserId
+          ? UserRole.OWNER_MODERATOR
+          : UserRole.LISTENER;
+
+      const participant = await roomService.addParticipant(id, userId, desiredRole);
       const participantRole = participant.role as UserRole;
       const livekitRole = this.mapToLiveKitRole(participantRole);
       const username = req.user?.username || `user_${userId}`;
@@ -235,6 +241,49 @@ export class RoomController {
       }
 
       res.json({ message: 'Left room successfully' });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async mediaToken(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.userId;
+
+      const room = await roomService.findById(id);
+      if (room.status === RoomStatus.ENDED) {
+        throw new BadRequestError('Room has ended');
+      }
+
+      const participant = await roomService.getParticipant(id, userId);
+      const participantRole = participant.role as UserRole;
+      const livekitRole = this.mapToLiveKitRole(participantRole);
+      const username = req.user?.username || `user_${userId}`;
+
+      let livekitToken = '';
+      if (config.services.livekitRequired && !livekitService.isConfigured()) {
+        throw new ServiceUnavailableError('LiveKit service is not available');
+      }
+
+      if (livekitService.isConfigured()) {
+        livekitToken = livekitService.generateToken({
+          roomName: id,
+          userId,
+          username,
+          role: livekitRole,
+        });
+      }
+
+      if (config.services.livekitRequired && !livekitToken) {
+        throw new ServiceUnavailableError('LiveKit token could not be generated');
+      }
+
+      res.json({
+        roomId: id,
+        role: participantRole,
+        token: livekitToken,
+      });
     } catch (error) {
       next(error);
     }
@@ -317,6 +366,17 @@ export class RoomController {
         status: room.status,
         createdAt: room.created_at,
       })));
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPendingSpeakInvite(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const userId = req.user!.userId;
+      const pending = await roomService.hasPendingSpeakInvite(id, userId);
+      res.json({ pending });
     } catch (error) {
       next(error);
     }

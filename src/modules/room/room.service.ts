@@ -215,7 +215,28 @@ export class RoomService {
     if (role !== UserRole.OWNER_MODERATOR) {
       const existingRoom = await redisClient.getClient().get(RedisKeys.userRoom(userIdNum.toString()));
       if (existingRoom && existingRoom !== roomId) {
-        throw new BadRequestError('You are already in another room. Please leave first.');
+        const existingRoomId = Number(existingRoom);
+        if (!Number.isInteger(existingRoomId)) {
+          await redisClient.getClient().del(RedisKeys.userRoom(userIdNum.toString()));
+        } else {
+          const membership = await database.query(
+            `SELECT r.status
+             FROM room_participants rp
+             JOIN rooms r ON r.id = rp.room_id
+             WHERE rp.room_id = $1 AND rp.user_id = $2
+             LIMIT 1`,
+            [existingRoomId, userIdNum]
+          );
+
+          const isStaleMembership =
+            membership.rows.length === 0 || membership.rows[0].status === RoomStatus.ENDED;
+
+          if (isStaleMembership) {
+            await redisClient.getClient().del(RedisKeys.userRoom(userIdNum.toString()));
+          } else {
+            throw new BadRequestError('You are already in another room. Please leave first.');
+          }
+        }
       }
     }
 
@@ -232,6 +253,8 @@ export class RoomService {
     const result = await database.query(
       `INSERT INTO room_participants (room_id, user_id, role, is_muted, is_hand_raised, joined_at, stage_joined_at)
        VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+       ON CONFLICT (room_id, user_id)
+       DO UPDATE SET role = room_participants.role
        RETURNING *`,
       [
         parseInt(roomId),
@@ -243,8 +266,11 @@ export class RoomService {
       ]
     );
 
+    const participant = result.rows[0];
+    const effectiveRole = participant.role as UserRole;
+
     const pipeline = redisClient.getClient().pipeline();
-    if (role === UserRole.SPEAKER || role === UserRole.MODERATOR || role === UserRole.OWNER_MODERATOR) {
+    if (effectiveRole === UserRole.SPEAKER || effectiveRole === UserRole.MODERATOR || effectiveRole === UserRole.OWNER_MODERATOR) {
       pipeline.sadd(RedisKeys.roomSpeakers(roomId), userIdNum.toString());
       pipeline.srem(RedisKeys.roomListeners(roomId), userIdNum.toString());
     } else {
@@ -252,7 +278,7 @@ export class RoomService {
       pipeline.srem(RedisKeys.roomSpeakers(roomId), userIdNum.toString());
     }
 
-    if (role === UserRole.MODERATOR || role === UserRole.OWNER_MODERATOR) {
+    if (effectiveRole === UserRole.MODERATOR || effectiveRole === UserRole.OWNER_MODERATOR) {
       pipeline.sadd(RedisKeys.roomModerators(roomId), userIdNum.toString());
     } else {
       pipeline.srem(RedisKeys.roomModerators(roomId), userIdNum.toString());
@@ -261,7 +287,7 @@ export class RoomService {
     pipeline.set(RedisKeys.userRoom(userIdNum.toString()), roomId);
     await pipeline.exec();
 
-    return result.rows[0];
+    return participant;
   }
 
   async removeParticipant(roomId: string, userId: string): Promise<void> {
@@ -549,6 +575,36 @@ export class RoomService {
     return counts.listenerCount;
   }
 
+  async listEmptyRoomSweepCandidates(minAgeSeconds: number): Promise<string[]> {
+    const ageSeconds = Math.max(0, minAgeSeconds);
+    const result = await database.query(
+      `SELECT id
+       FROM rooms
+       WHERE status = $1
+         AND created_at <= NOW() - make_interval(secs => $2)
+         AND NOT EXISTS (
+           SELECT 1
+           FROM room_participants rp
+           WHERE rp.room_id = rooms.id
+         )
+       ORDER BY id ASC`,
+      [RoomStatus.LIVE, ageSeconds]
+    );
+
+    return result.rows.map((row) => row.id.toString());
+  }
+
+  async endRoomIfLive(roomId: string): Promise<boolean> {
+    const room = await roomRepository.findById(parseInt(roomId));
+
+    if (!room || room.status !== RoomStatus.LIVE) {
+      return false;
+    }
+
+    await this.endRoom(roomId);
+    return true;
+  }
+
   /**
    * Invite a listener to become a speaker.
    * Creates a Redis invite key with TTL; target user accepts or declines.
@@ -588,15 +644,21 @@ export class RoomService {
     logger.info({ roomId, targetUserId, actorId }, 'Speaker invite sent');
   }
 
+  async hasPendingSpeakInvite(roomId: string, userId: string): Promise<boolean> {
+    const inviteKey = `room:${roomId}:speak_invite:${userId}`;
+    const invite = await redisClient.getClient().get(inviteKey);
+    return Boolean(invite);
+  }
+
   /**
    * Accept a pending speak invitation.
    */
-  async acceptSpeakInvite(roomId: string, userId: string): Promise<void> {
+  async acceptSpeakInvite(roomId: string, userId: string): Promise<boolean> {
     const inviteKey = `room:${roomId}:speak_invite:${userId}`;
     const invite = await redisClient.getClient().get(inviteKey);
 
     if (!invite) {
-      throw new BadRequestError('No pending speak invitation found');
+      return false;
     }
 
     await redisClient.getClient().del(inviteKey);
@@ -609,15 +671,20 @@ export class RoomService {
 
     await this.changeRole(roomId, userId, UserRole.SPEAKER, 'system');
     logger.info({ roomId, userId }, 'Speaker invite accepted');
+    return true;
   }
 
   /**
    * Decline a pending speak invitation.
    */
-  async declineSpeakInvite(roomId: string, userId: string): Promise<void> {
+  async declineSpeakInvite(roomId: string, userId: string): Promise<boolean> {
     const inviteKey = `room:${roomId}:speak_invite:${userId}`;
-    await redisClient.getClient().del(inviteKey);
-    logger.info({ roomId, userId }, 'Speaker invite declined');
+    const deleted = await redisClient.getClient().del(inviteKey);
+    if (deleted > 0) {
+      logger.info({ roomId, userId }, 'Speaker invite declined');
+      return true;
+    }
+    return false;
   }
 
   /**

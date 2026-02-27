@@ -14,6 +14,7 @@ import { authLimiter, apiLimiter } from './middleware/rate-limiter.js';
 import { authRoutes } from './modules/auth/index.js';
 import { userRoutes } from './modules/user/index.js';
 import { roomRoutes } from './modules/room/room.routes.js';
+import { roomService } from './modules/room/room.service.js';
 import { moderationRoutes } from './modules/moderation/index.js';
 import { setupRoomGateway } from './modules/room/room.gateway.js';
 import { setupMicRequestGateway } from './modules/mic-request/index.js';
@@ -24,6 +25,7 @@ import { handoverService } from './modules/room/handover.service.js';
 import { livekitService } from './config/livekit.js';
 import { emailService } from './config/email.js';
 import { smsService } from './config/sms.js';
+import { registerSocketServer } from './config/socket-state.js';
 
 // Collect default Prometheus metrics
 collectDefaultMetrics({ register: registry });
@@ -162,6 +164,12 @@ const io = new Server(httpServer, {
     credentials: true,
   },
 });
+registerSocketServer(io);
+
+// Track active connections and background task state for graceful shutdown.
+const activeConnections = new Set<string>();
+let emptyRoomSweepTimer: NodeJS.Timeout | null = null;
+let isShuttingDown = false;
 
 app.use(securityMiddleware);
 app.use(corsMiddleware);
@@ -383,6 +391,59 @@ if (config.nodeEnv === 'production' && !config.ops.enableSwagger) {
 
 app.use(errorFilter);
 
+async function sweepEmptyLiveRooms(): Promise<void> {
+  if (isShuttingDown) {
+    return;
+  }
+
+  try {
+    const candidates = await roomService.listEmptyRoomSweepCandidates(config.room.emptyRoomMinAgeSeconds);
+    let closedCount = 0;
+
+    for (const roomId of candidates) {
+      const sockets = await io.of('/room').in(roomId).fetchSockets();
+      if (sockets.length > 0) {
+        continue;
+      }
+
+      const ended = await roomService.endRoomIfLive(roomId);
+      if (ended) {
+        closedCount++;
+      }
+    }
+
+    if (closedCount > 0) {
+      logger.info({ closedCount }, 'Auto-closed empty live rooms');
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'Empty room sweep failed');
+  }
+}
+
+function startEmptyRoomSweepTask(): void {
+  const intervalSeconds = Math.max(0, config.room.emptyRoomSweepSeconds);
+  if (intervalSeconds === 0) {
+    logger.info('Empty room sweep is disabled');
+    return;
+  }
+
+  const intervalMs = intervalSeconds * 1000;
+  emptyRoomSweepTimer = setInterval(() => {
+    void sweepEmptyLiveRooms();
+  }, intervalMs);
+
+  logger.info(
+    {
+      intervalSeconds,
+      minAgeSeconds: config.room.emptyRoomMinAgeSeconds,
+    },
+    'Empty room auto-close sweep started'
+  );
+
+  // Run once at startup to clean stale rooms from previous sessions.
+  void sweepEmptyLiveRooms();
+}
+
 async function start(): Promise<void> {
   try {
     logger.info('Starting Debate Server...');
@@ -423,6 +484,7 @@ async function start(): Promise<void> {
     setupRoomGateway(io);
     setupMicRequestGateway(io);
     logger.info('WebSocket gateways initialized');
+    startEmptyRoomSweepTask();
 
     httpServer.listen(config.port, () => {
       logger.info({ port: config.port, env: config.nodeEnv }, 'Server started');
@@ -432,10 +494,6 @@ async function start(): Promise<void> {
     process.exit(1);
   }
 }
-
-// Track active connections for graceful shutdown
-const activeConnections = new Set<string>();
-let isShuttingDown = false;
 
 // Connection tracking middleware for Socket.IO
 function trackConnection(socket: Socket): void {
@@ -456,6 +514,11 @@ async function shutdown(): Promise<void> {
 
   isShuttingDown = true;
   logger.info('Shutting down gracefully...');
+
+  if (emptyRoomSweepTimer) {
+    clearInterval(emptyRoomSweepTimer);
+    emptyRoomSweepTimer = null;
+  }
 
   // 1. Notify all connected clients about shutdown
   const shutdownMessage = {

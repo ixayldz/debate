@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search } from 'lucide-react';
@@ -15,6 +16,7 @@ import { MobileShell } from '@/components/layout/mobile-shell';
 import { Button, Card, Input } from '@/components/common/ui';
 
 export default function HallPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
@@ -66,7 +68,7 @@ export default function HallPage() {
       void queryClient.invalidateQueries({ queryKey: ['rooms', 'featured'] });
       void queryClient.invalidateQueries({ queryKey: ['rooms', 'trending'] });
       if (room?.id) {
-        window.location.href = `/room/${room.id}`;
+        router.push(`/room/${room.id}`);
       }
     },
   });

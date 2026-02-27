@@ -38,6 +38,7 @@ export function setupMicRequestGateway(io: Server): void {
 
   micNamespace.on('connection', (socket: AuthenticatedSocket) => {
     logger.debug({ socketId: socket.id, userId: socket.user?.userId }, 'User connected to mic namespace');
+    socket.join(`user:${socket.user!.userId}`);
 
     // Join a room to receive mic queue updates
     socket.on('mic:join_room', async (data: { roomId: string }) => {
@@ -71,7 +72,8 @@ export function setupMicRequestGateway(io: Server): void {
         const queue = await micRequestService.getQueue(roomId);
 
         socket.emit('mic:request_queued', { roomId, queue });
-        socket.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        micNamespace.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        io.of('/room').to(roomId).emit('room:mic_queue_updated', { roomId, queue });
       } catch (error: any) {
         logger.error({ err: error }, 'Error requesting mic');
         socket.emit('mic:error', { message: error.message || 'Failed to request mic' });
@@ -88,7 +90,8 @@ export function setupMicRequestGateway(io: Server): void {
         const queue = await micRequestService.getQueue(roomId);
 
         socket.emit('mic:cancelled', { roomId });
-        socket.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        micNamespace.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        io.of('/room').to(roomId).emit('room:mic_queue_updated', { roomId, queue });
       } catch (error: any) {
         logger.error({ err: error }, 'Error cancelling mic request');
         socket.emit('mic:error', { message: error.message || 'Failed to cancel mic request' });
@@ -100,12 +103,28 @@ export function setupMicRequestGateway(io: Server): void {
         const { roomId, requestId } = data;
         const userId = socket.user!.userId;
 
-        await micRequestService.acceptRequest(roomId, requestId, userId);
+        const request = await micRequestService.acceptRequest(roomId, requestId, userId);
 
         const queue = await micRequestService.getQueue(roomId);
 
-        socket.emit('mic:request_handled', { roomId, requestId, action: 'accepted' });
-        socket.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        socket.emit('mic:request_handled', {
+          roomId,
+          requestId,
+          action: 'accepted',
+          targetUserId: request.userId,
+        });
+        micNamespace.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        io.of('/room').to(roomId).emit('room:mic_queue_updated', { roomId, queue });
+        micNamespace.to(`user:${request.userId}`).emit('mic:request_result', {
+          roomId,
+          requestId,
+          action: 'accepted',
+        });
+        io.of('/room').to(roomId).emit('room:role_changed', {
+          roomId,
+          userId: request.userId,
+          role: UserRole.SPEAKER,
+        });
       } catch (error: any) {
         logger.error({ err: error }, 'Error accepting mic request');
         socket.emit('mic:error', { message: error.message || 'Failed to accept mic request' });
@@ -117,12 +136,23 @@ export function setupMicRequestGateway(io: Server): void {
         const { roomId, requestId } = data;
         const userId = socket.user!.userId;
 
-        await micRequestService.rejectRequest(roomId, requestId, userId);
+        const request = await micRequestService.rejectRequest(roomId, requestId, userId);
 
         const queue = await micRequestService.getQueue(roomId);
 
-        socket.emit('mic:request_handled', { roomId, requestId, action: 'rejected' });
-        socket.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        socket.emit('mic:request_handled', {
+          roomId,
+          requestId,
+          action: 'rejected',
+          targetUserId: request.userId,
+        });
+        micNamespace.to(roomId).emit('mic:queue_updated', { roomId, queue });
+        io.of('/room').to(roomId).emit('room:mic_queue_updated', { roomId, queue });
+        micNamespace.to(`user:${request.userId}`).emit('mic:request_result', {
+          roomId,
+          requestId,
+          action: 'rejected',
+        });
       } catch (error: any) {
         logger.error({ err: error }, 'Error rejecting mic request');
         socket.emit('mic:error', { message: error.message || 'Failed to reject mic request' });
